@@ -1,87 +1,124 @@
-let speech;
-let said;
-let word = [];
-var directionX;
-
 let video;
-let poseNet;
-let poses = [];
+let yolo;
+let status;
+let objects = [];
+let myFont;
+let word = [];
+let targetWord = "";
+let score = 0;
+let speech;
+let gameRunning = false;
+let timeoutID;
+let output;
 
-let pkeyHandX, pkeyHandY, keyHandX, keyHandY;
+function preload() {
+  myFont=loadFont('Roboto-Medium.ttf');
+}
 
 function setup() {
-  createCanvas(700, 480);
-  directionX = 1;
+  createCanvas(640, 480);
+  video = createCapture(VIDEO);
+  video.size(width, height);
 
-  speechRec = new p5.SpeechRec("ko-KR", gotSpeech);
-  let continuous = true;
+  let options = { filterBoxesThreshold: 0.01, IOUThreshold: 0.4, classProbThreshold: 0.4 }
+  // Create a YOLO method
+  yolo = ml5.YOLO(video, options, startDetecting);
+
+  // Hide the original video
+  video.hide();
+  status = select('#status');
+
+  speechRec = new p5.SpeechRec('en-US', gotSpeech);
+  let continuous = false;  // Change to false
   let interimResults = false;
   speechRec.start(continuous, interimResults);
 
-  function gotSpeech() {
-    console.log(speechRec);
-    if (speechRec.resultValue) {
-      said = speechRec.resultString;
-      word = said.split("");
-      console.log(said);
-    }
-  }
-
-  video = createCapture(VIDEO);
-  video.size(width, height);
-  poseNet = ml5.poseNet(video, modelReady);
-  poseNet.on("pose", function (results) {
-    poses = results;
-  });
-  video.hide();
-}
-
-function modelReady() {
-  console.log("Ai Activated!");
+  speech = new p5.Speech();
+  speech.setRate(0.85);
+  speech.setPitch(0.8);
+  
+  output = select('#speech');
+  
 }
 
 function draw() {
   image(video, 0, 0, width, height);
-  drawKeypoints();
+  
+  for (let i = 0; i < objects.length; i++) {
+    if(objects[i].label == targetWord) {
+      noStroke();
+      fill(0, 255, 0);
+      textSize(18);
+      textFont(myFont);
+      text(objects[i].label + " " + nfc(objects[i].confidence * 100.0, 2) + "%", objects[i].x * width, objects[i].y * height - 5);
+      noFill();
+      strokeWeight(4);
+      stroke(0, 255, 0);
+      rect(objects[i].x * width, objects[i].y * height, objects[i].w * width, objects[i].h * height);
+    }
+  }
+
+  if (!gameRunning && objects.length > 0) {
+    targetWord = objects[Math.floor(Math.random() * objects.length)].label;
+    score = 0;
+    gameRunning = true;
+    speech.speak("Let's play a game! Say the word when it appears on the screen.");
+  }
+
+  if (gameRunning) {
+    fill(0, 255, 0);
+    textSize(20);
+    text(targetWord, width/2, height/2);
+    text("Score: " + score, width - 300, 50);
+
+    if (score >= 100) {
+      speech.speak("SUCCESS!");
+      gameRunning = false;
+      timeoutID = setTimeout(startDetecting, 5000);  // restart the game after 5 seconds
+    }
+  }
 }
 
-function drawKeypoints() {
-  for (let i = 0; i < poses.length; i++) {
-    let pose = poses[i].pose;
-    let keypoint = pose.keypoints[9];
-    if (keypoint.score > 0.2) {
-      keyHandX = pkeyHandX;
-      keyHandY = pkeyHandY;
-      pkeyHandX = keypoint.position.x;
-      pkeyHandY = keypoint.position.y;
+function startDetecting() {
+  status.html('Model loaded!');
+  clearTimeout(timeoutID);
+  detect();
+}
 
-      // if (keyHandX < keyHandX) {
-      if (keyHandX > width / 2) {
-        directionX = -1;
-      }
-      if (keyHandX < width / 2) {
-        // if (keyHandX >= keyHandX) {
-        directionX = 1;
-      }
-      for (var j = 0; j < word.length; j++) {
-        text(
-          word[j],
-          keyHandX + directionX * j * 20, // 텍스트 간격 넓게 설정
-          random(keyHandY - 3, keyHandY + 3)
-        );
-        console.log(word[j]);
-      }
+function detect() {
+  yolo.detect(function(err, results) {
+    objects = results;
+    detect();
+  });
+}
 
-      textSize(20); // 텍스트 크기 설정
-
-      for (var j = 0; j < word.length; j++) {
-        text(
-          word[j],
-          keyHandX + directionX * j * 20, // 텍스트 간격 넓게 설정
-          random(keyHandY - 3, keyHandY + 3)
-        );
-        console.log(word[j]);
+function gotSpeech() {
+  console.log(speechRec);
+  if (speechRec.resultValue) {
+    let said = speechRec.resultString.toLowerCase().trim();  // Convert to lowercase and remove leading/trailing whitespaces
+    output.html(said);
+    if (gameRunning && said == targetWord.toLowerCase()) {  // Convert targetWord to lowercase
+      score += 10;
+      if (score < 100) {
+        // Select a new word
+        targetWord = objects[Math.floor(Math.random() * objects.length)].label;
       }
+    } else {
+      speech.speak("Wrong word. Try again!");
     }
+  }
+}
+
+// Add a new function for key press
+function keyPressed() {
+  if (keyCode === ENTER) {
+    speechRec.start();
+  }
+}
+
+// Add a new function for key release
+function keyReleased() {
+  if (keyCode === ENTER) {
+    speechRec.stop();
   }
 }
